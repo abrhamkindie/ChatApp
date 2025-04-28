@@ -1,0 +1,54 @@
+# Node.js and npm
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn.lock
+package-lock.json
+
+# Environment variables
+.env
+*.env
+*.env.*
+!.env.example
+
+# Build outputs
+/build/
+/dist/
+/client/build/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+.DS_Store
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# MongoDB local data (if applicable)
+/data/
+/mongod/
+
+# Cloudinary credentials (if stored in files)
+cloudinary.json
+cloudinary.config
+
+# Dependency directories
+/dependencies/
+
+# Testing and coverage
+/coverage/
+/test-results/
+
+# Production-specific files
+/public/uploads/
+/uploads/
