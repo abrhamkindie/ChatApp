@@ -4,8 +4,9 @@ import Login from './components/Login';
 import Register from './components/Register';
 import Chat from './components/Chat';
 import Hero from './components/Hero'
-import ProtectedRoute from './components/protectedRoute';
-import { AuthContext } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+
+ import { AuthContext } from './context/AuthContext';
 
 function App() {
   const { currentUser, loading } = useContext(AuthContext);
