@@ -8,7 +8,6 @@ import EmojiPicker from 'emoji-picker-react';
 import { Base_Url } from '../../API';
 import { AuthContext } from '../context/AuthContext';
 
-// Singleton Socket.IO instance
 let socketInstance = null;
 
 function Chat() {
@@ -41,7 +40,7 @@ function Chat() {
 
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
-  const defaultProfilePicture= 'https://i.pinimg.com/736x/cc/84/49/cc8449c90a4b19a0d856eb0f205a0da5.jpg';
+  const defaultProfilePicture = 'https://i.pinimg.com/736x/cc/84/49/cc8449c90a4b19a0d856eb0f205a0da5.jpg';
   const getMessageSignature = (message) => {
     return `${message.sender._id}-${message.timestamp}-${message.fileName || message.content}`;
   };
@@ -57,6 +56,7 @@ function Chat() {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
+        withCredentials: true,
       });
     }
 
@@ -72,7 +72,7 @@ function Chat() {
     };
 
     const handleReceiveMessage = (message) => {
-       if (!currentUser?.userId) return;
+      if (!currentUser?.userId) return;
 
       const chatId = message.chatId;
       const sender = users.find((u) => u._id === message.sender._id) || { username: 'Unknown' };
@@ -83,7 +83,7 @@ function Chat() {
       );
 
       if (isDuplicate) {
-         return;
+        return;
       }
 
       const tempId = Object.keys(tempMessageIds).find((tid) => tempMessageIds[tid] === message._id);
@@ -143,7 +143,7 @@ function Chat() {
     };
 
     const handleReceiveGroupMessage = (message) => {
-       if (!currentUser?.userId) return;
+      if (!currentUser?.userId) return;
 
       const groupId = message.group.toString();
       const group = groups.find((g) => g._id === groupId) || { name: 'Unknown' };
@@ -155,7 +155,7 @@ function Chat() {
       );
 
       if (isDuplicate) {
-         return;
+        return;
       }
 
       const tempId = Object.keys(tempMessageIds).find((tid) => tempMessageIds[tid] === message._id);
@@ -217,6 +217,11 @@ function Chat() {
 
     const handleMessageRead = (message) => {
       setMessages((prev) => prev.map((m) => (m._id === message._id ? message : m)));
+      if (message.chatId && selectedUser && message.chatId === [currentUser.userId, selectedUser._id].sort().join('-')) {
+        setUnreadCounts((prev) => ({ ...prev, [message.chatId]: 0 }));
+      } else if (message.group && selectedGroup && message.group.toString() === selectedGroup._id) {
+        setUnreadCounts((prev) => ({ ...prev, [message.group.toString()]: 0 }));
+      }
     };
 
     const handleOnlineUsers = (onlineUserIds) => {
@@ -352,6 +357,37 @@ function Chat() {
     fetchProfile();
   }, [setCurrentUser, navigate]);
 
+  useEffect(() => {
+    const fetchUnreadCounts = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token || !currentUser?.userId) return;
+        const newUnreadCounts = {};
+        // Fetch unread counts for private chats
+        for (const user of users) {
+          const chatId = [currentUser.userId, user._id].sort().join('-');
+          const res = await axios.get(`${Base_Url}/messages/${chatId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          newUnreadCounts[chatId] = res.data.unreadCount || 0;
+        }
+        // Fetch unread counts for groups
+        for (const group of groups) {
+          const res = await axios.get(`${Base_Url}/groups/${group._id}/messages`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          newUnreadCounts[group._id] = res.data.unreadCount || 0;
+        }
+        setUnreadCounts(newUnreadCounts);
+      } catch (err) {
+        console.error('Fetch unread counts error:', err);
+      }
+    };
+    if (users.length > 0 && groups.length > 0) {
+      fetchUnreadCounts();
+    }
+  }, [users, groups, currentUser]);
+
   const fetchMessages = useCallback(async () => {
     if (!currentUser?.userId || (!selectedUser && !selectedGroup)) return;
 
@@ -364,10 +400,10 @@ function Chat() {
         const res = await axios.get(`${Base_Url}/messages/${chatId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setMessages(res.data);
+        setMessages(res.data.messages);
         setUnreadCounts((prev) => ({ ...prev, [chatId]: 0 }));
 
-        for (const msg of res.data) {
+        for (const msg of res.data.messages) {
           if (!msg.readBy.some((user) => user._id === currentUser.userId) && msg.sender._id !== currentUser.userId) {
             await axios.put(
               `${Base_Url}/messages/${msg._id}/read`,
@@ -388,10 +424,10 @@ function Chat() {
         const res = await axios.get(`${Base_Url}/groups/${selectedGroup._id}/messages`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setMessages(res.data);
+        setMessages(res.data.messages);
         setUnreadCounts((prev) => ({ ...prev, [selectedGroup._id]: 0 }));
 
-        for (const msg of res.data) {
+        for (const msg of res.data.messages) {
           if (!msg.readBy.some((user) => user._id === currentUser.userId) && msg.sender._id !== currentUser.userId) {
             await axios.put(
               `${Base_Url}/messages/${msg._id}/read`,
@@ -423,7 +459,6 @@ function Chat() {
     fetchMessages();
   }, [fetchMessages]);
 
- 
   const checkExistingChat = async (userId) => {
     try {
       const token = localStorage.getItem('token');
@@ -432,102 +467,101 @@ function Chat() {
       const res = await axios.get(`${Base_Url}/messages/${chatId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      return res.data.length > 0 ? chatId : null;
+      return res.data.messages.length > 0 ? chatId : null;
     } catch (err) {
       console.error('Check existing chat error:', err);
       return null;
     }
   };
 
-
-const viewUserProfile = async (userId) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) throw new Error('No token found');
-    const res = await axios.get(`${Base_Url}/profile/${userId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-     setViewingUserProfile({ ...res.data, userId }); // Store userId in viewingUserProfile
-    setShowProfile(false);
-    setSidebarOpen(false);
-    setShowGroupMembers(false);
-  } catch (err) {
-    console.error('View user profile error:', err);
-    toast.error(err.response?.status === 401 ? 'Unauthorized: Please log in again' : 'Failed to fetch user profile');
-    if (err.response?.status === 401) {
-      localStorage.removeItem('token');
-      setCurrentUser(null);
-      navigate('/login');
+  const viewUserProfile = async (userId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No token found');
+      const res = await axios.get(`${Base_Url}/profile/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setViewingUserProfile({ ...res.data, userId });
+      setShowProfile(false);
+      setSidebarOpen(false);
+      setShowGroupMembers(false);
+    } catch (err) {
+      console.error('View user profile error:', err);
+      toast.error(err.response?.status === 401 ? 'Unauthorized: Please log in again' : 'Failed to fetch user profile');
+      if (err.response?.status === 401) {
+        localStorage.removeItem('token');
+        setCurrentUser(null);
+        navigate('/login');
+      }
     }
-  }
-};
+  };
 
-// Updated fetchUserDetails function
-const fetchUserDetails = async (userId) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) throw new Error('No token found');
-    const res = await axios.get(`${Base_Url}/profile/${userId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-     return {
-      _id: userId, // Use passed userId since API doesn't return _id
-      username: res.data.username,
-      profilePicture: res.data.profilePicture,
-      online: false,
-    };
-  } catch (err) {
-    console.error('Fetch user details error:', err);
-    throw new Error('Failed to fetch user details');
-  }
-};
+  const fetchUserDetails = async (userId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No token found');
+      const res = await axios.get(`${Base_Url}/profile/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return {
+        _id: userId,
+        username: res.data.username,
+        profilePicture: res.data.profilePicture,
+        online: false,
+      };
+    } catch (err) {
+      console.error('Fetch user details error:', err);
+      throw new Error('Failed to fetch user details');
+    }
+  };
 
-// Updated startChatWithUser function
-const startChatWithUser = async () => {
-   if (!viewingUserProfile || !viewingUserProfile.userId) {
-    toast.error('User profile not loaded correctly. Please try again.');
-    console.error('No valid user profile selected:', viewingUserProfile);
-    return;
-  }
-
-  setIsStartingChat(true);
-  try {
-    const userId = viewingUserProfile.userId;
-    let targetUser = users.find((u) => u._id === userId);
-
-    if (!targetUser) {
-      targetUser = await fetchUserDetails(userId);
-      setUsers((prev) => [...prev, targetUser]);
+  const startChatWithUser = async () => {
+    if (!viewingUserProfile || !viewingUserProfile.userId) {
+      toast.error('User profile not loaded correctly. Please try again.');
+      console.error('No valid user profile selected:', viewingUserProfile);
+      return;
     }
 
-    const existingChatId = await checkExistingChat(userId);
+    setIsStartingChat(true);
+    try {
+      const userId = viewingUserProfile.userId;
+      let targetUser = users.find((u) => u._id === userId);
 
-    setSelectedUser(targetUser);
-    setSelectedGroup(null);
-    setViewingUserProfile(null);
-    setShowProfile(false);
-    setSidebarOpen(false);
+      if (!targetUser) {
+        targetUser = await fetchUserDetails(userId);
+        setUsers((prev) => [...prev, targetUser]);
+      }
 
-    if (existingChatId) {
-      socketInstance?.emit('joinChat', existingChatId);
-      await fetchMessages();
-    } else {
-      setMessages([]);
-      const newChatId = [currentUser.userId, userId].sort().join('-');
-      socketInstance?.emit('joinChat', newChatId);
+      const existingChatId = await checkExistingChat(userId);
+
+      setSelectedUser(targetUser);
+      setSelectedGroup(null);
+      setViewingUserProfile(null);
+      setShowProfile(false);
+      setSidebarOpen(false);
+      setUnreadCounts((prev) => ({
+        ...prev,
+        [[currentUser.userId, userId].sort().join('-')]: 0,
+      }));
+
+      if (existingChatId) {
+        socketInstance?.emit('joinChat', existingChatId);
+        await fetchMessages();
+      } else {
+        setMessages([]);
+        const newChatId = [currentUser.userId, userId].sort().join('-');
+        socketInstance?.emit('joinChat', newChatId);
+      }
+
+      toast.success('Chat opened successfully');
+    } catch (err) {
+      console.error('Error starting chat:', err);
+      toast.error(err.message || 'Failed to start chat');
+      setSelectedUser(null);
+    } finally {
+      setIsStartingChat(false);
     }
-
-    toast.success('Chat opened successfully');
-  } catch (err) {
-    console.error('Error starting chat:', err);
-    toast.error(err.message || 'Failed to start chat');
-    setSelectedUser(null);
-  } finally {
-    setIsStartingChat(false);
-  }
-};
-  
-
+  };
 
   const joinGroup = async (groupId) => {
     try {
@@ -649,16 +683,16 @@ const startChatWithUser = async () => {
         reader.readAsDataURL(profilePictureFile);
         await new Promise((resolve, reject) => {
           reader.onload = () => {
-             formData.profilePicture = reader.result;
+            formData.profilePicture = reader.result;
             resolve();
           };
           reader.onerror = () => reject(new Error('Failed to read profile picture'));
         });
       }
-       const res = await axios.put(`${Base_Url}/profile`, formData, {
+      const res = await axios.put(`${Base_Url}/profile`, formData, {
         headers: { Authorization: `Bearer ${token}` },
       });
-       setProfile(res.data);
+      setProfile(res.data);
       setCurrentUser({ ...currentUser, username: res.data.username, profilePicture: res.data.profilePicture });
       setProfilePictureFile(null);
       setShowProfile(false);
@@ -738,7 +772,7 @@ const startChatWithUser = async () => {
           setTempMessageIds((prev) => ({ ...prev, [tempId]: messageId }));
         } else if (selectedGroup) {
           payload.groupId = selectedGroup._id;
-           const res = await axios.post(`${Base_Url}/groups/${selectedGroup._id}/messages`, payload, {
+          const res = await axios.post(`${Base_Url}/groups/${selectedGroup._id}/messages`, payload, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           });
           fileUrl = res.data.fileUrl || '';
@@ -1028,27 +1062,54 @@ const startChatWithUser = async () => {
           </h3>
           <ul className="space-y-2">
             {allGroups.map((group) => (
-              <li
-                key={group._id}
-                className="p-3 rounded-xl flex justify-between items-center hover:bg-teal-600 transition-all"
-              >
-                <div className="flex items-center space-x-2 max-w-[70%]">
-                  <img
-                    src={group.profilePicture || defaultProfilePicture}
-                    alt={group.name}
-                    className="w-8 h-8 rounded-full mr-2 border-2 border-amber-400 hover:ring-2 hover:ring-amber-300 transition-all"
-                    key={group.profilePicture || group._id}
-                    onError={(e) => (e.target.src = defaultProfilePicture)}
-                  />
-                  <span className="text-white font-semibold truncate text-sm">{group.name}</span>
-                </div>
-                <button
-                  onClick={() => joinGroup(group._id)}
-                  className="px-3 py-1 bg-gradient-to-r from-amber-400 to-amber-600 text-gray-900 rounded-lg hover:from-amber-300 hover:to-amber-500 text-xs transition-all shadow-sm min-w-[44px] min-h-[44px] flex items-center justify-center"
-                >
-                  Join
-                </button>
-              </li>
+
+
+<li
+  key={group._id}
+  className={`p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-teal-600/80 transition-all duration-200 ${
+    selectedGroup?._id === group._id ? 'bg-teal-500/90 shadow-md ring-1 ring-teal-400/30' : 'bg-teal-700/40'
+  }`}
+>
+  {/* Group Info (Left Side) */}
+  <div 
+    className="flex items-center min-w-0 gap-2 flex-1 cursor-pointer"
+    onClick={() => {
+      setSelectedGroup(group);
+      setSelectedUser(null);
+      setShowProfile(false);
+      setSidebarOpen(false);
+    }}
+  >
+    <img
+      src={group.profilePicture || defaultProfilePicture}
+      alt={group.name}
+      className="w-9 h-9 rounded-full border-2 border-amber-400/80 hover:ring-2 hover:ring-amber-300/50 transition-all shrink-0"
+      key={group.profilePicture || group._id}
+      onError={(e) => (e.target.src = defaultProfilePicture)}
+    />
+    
+    <div className="min-w-0">
+      <p className="text-white font-medium text-sm truncate">
+        {group.name}
+      </p>
+      {/* Optional: Add member count or other metadata */}
+      {/* <p className="text-teal-200/80 text-xs truncate">12 members</p> */}
+    </div>
+  </div>
+
+  {/* Join Button */}
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      joinGroup(group._id);
+    }}
+    className="px-3 py-1.5 bg-gradient-to-r from-amber-400 to-amber-600 text-gray-900 font-semibold rounded-lg hover:from-amber-300 hover:to-amber-500 text-xs transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center whitespace-nowrap"
+    aria-label={`Join ${group.name}`}
+  >
+    Join Group
+  </button>
+</li>
+
             ))}
           </ul>
         </div>
@@ -1059,48 +1120,75 @@ const startChatWithUser = async () => {
           {users.map((user) => {
             const chatId = [currentUser?.userId, user._id].sort().join('-');
             return (
-              <li
-                key={user._id}
-                className={`p-3 rounded-xl cursor-pointer hover:bg-teal-600 flex justify-between items-center ${
-                  selectedUser?._id === user._id ? 'bg-teal-500 shadow-md ring-1 ring-teal-500/20' : ''
-                } transition-all`}
-              >
-                <span
-                  onClick={() => {
-                    setSelectedUser(user);
-                    setSelectedGroup(null);
-                    setShowProfile(false);
-                    setViewingUserProfile(null);
-                    setSidebarOpen(false);
-                  }}
-                  className="flex items-center flex-1 space-x-2"
-                >
-                  <img
-                    src={user.profilePicture || defaultProfilePicture}
-                    alt={user.username}
-                    className="w-8 h-8 rounded-full mr-2 border-2 border-amber-400 hover:ring-2 hover:ring-amber-300 transition-all"
-                    onError={(e) => (e.target.src = defaultProfilePicture)}
-                  />
-                  <span className="text-white font-semibold text-sm">{user.username}</span>
-                  <span className={`text-[10px] ml-1 ${user.online ? 'text-amber-400' : 'text-teal-400'}`}>
-                    {user.online ? '(Online)' : '(Offline)'}
-                  </span>
-                </span>
-                {unreadCounts[chatId] > 0 && (
-                  <span className="bg-red-600 text-white text-[10px] font-semibold rounded-full px-1.5 py-0.5 animate-pulse">
-                    {unreadCounts[chatId]}
-                  </span>
-                )}
-                <button
-                  onClick={() => {
-                    viewUserProfile(user._id);
-                    setSidebarOpen(false);
-                  }}
-                  className="px-2 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 hover:text-amber-300 rounded-lg text-xs transition-all min-w-[44px] min-h-[44px] flex items-center justify-center"
-                >
-                  Profile
-                </button>
-              </li>
+
+
+<li
+  key={user._id}
+  className={`p-2.5 rounded-xl cursor-pointer hover:bg-teal-600/80 flex items-center gap-3 ${
+    selectedUser?._id === user._id 
+      ? 'bg-teal-500/90 shadow-md ring-1 ring-teal-400/30' 
+      : 'bg-teal-700/40'
+  } transition-all duration-200`}
+>
+  {/* User Info (Left Side) */}
+  <div
+    onClick={() => {
+      setSelectedUser(user);
+      setSelectedGroup(null);
+      setShowProfile(false);
+      setViewingUserProfile(null);
+      setSidebarOpen(false);
+    }}
+    className="flex items-center flex-1 min-w-0 gap-2"
+  >
+    <img
+      src={user.profilePicture || defaultProfilePicture}
+      alt={user.username}
+      className="w-9 h-9 rounded-full border-2 border-amber-400/80 hover:ring-2 hover:ring-amber-300/50 transition-all shrink-0"
+      onError={(e) => (e.target.src = defaultProfilePicture)}
+    />
+    
+    <div className="flex flex-col min-w-0">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-white font-medium text-sm truncate">
+          {user.username}
+        </span>
+        <span className={`text-[10px] ${user.online ? 'text-amber-300' : 'text-teal-300/80'}`}>
+          {user.online ? 'Online' : 'Offline'}
+        </span>
+      </div>
+      {/* You could add a status message or last seen time here */}
+    </div>
+  </div>
+
+  {/* Right Side Actions */}
+  <div className="flex items-center gap-2">
+  
+    
+    {/* Profile Button */}
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        viewUserProfile(user._id);
+        setSidebarOpen(false);
+      }}
+      className="px-3 py-1.5 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 hover:text-amber-200 rounded-lg text-xs transition-all flex items-center justify-center"
+      aria-label="View profile"
+    >
+      View
+    </button>
+
+       {/* Unread Count Badge */}
+       {unreadCounts[chatId] > 0 && (
+      <span className="bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+        {unreadCounts[chatId]}
+      </span>
+    )}
+  </div>
+</li>
+
+
+
             );
           })}
         </ul>
@@ -1168,7 +1256,7 @@ const startChatWithUser = async () => {
           </div>
         </div>
       )}
-      <div className="flex-1 flex flex-col bg-teal-100 min-h-screen">
+      <div className="flex-1 flex flex-col bg-teal-100 min-h-screen ">
         {showProfile ? (
           <div className="p-3 sm:p-4">
             <h2 className="text-lg sm:text-xl font-bold mb-4 text-teal-800 text-center">Edit Your Profile</h2>
@@ -1279,201 +1367,199 @@ const startChatWithUser = async () => {
               <p className="text-teal-700 font-semibold mt-2 text-center text-sm">
                 Bio: <span className="font-normal">{viewingUserProfile.bio || 'No bio set'}</span>
               </p>
-              
-            <button
-              onClick={startChatWithUser}
-              disabled={isStartingChat}
-              className={`mt-3 w-full p-2 bg-amber-500 text-teal-900 font-semibold rounded-lg hover:bg-amber-400 transition-colors shadow-md text-sm min-h-[44px] ${
-                isStartingChat ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {isStartingChat ? 'Opening Chat...' : 'Start Chat'}
-            </button>
-
+              <button
+                onClick={startChatWithUser}
+                disabled={isStartingChat}
+                className={`mt-3 w-full p-2 bg-amber-500 text-teal-900 font-semibold rounded-lg hover:bg-amber-400 transition-colors shadow-md text-sm min-h-[44px] ${
+                  isStartingChat ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isStartingChat ? 'Starting Chat...' : 'Start Chat'}
+              </button>
+              <button
+                onClick={() => {
+                  setViewingUserProfile(null);
+                  setSidebarOpen(true);
+                }}
+                className="mt-2 w-full p-2 bg-teal-600 text-white font-semibold rounded-lg hover:bg-teal-500 transition-colors shadow-md text-sm min-h-[44px]"
+              >
+                Back
+              </button>
             </div>
           </div>
-        )    
-        
-     : selectedUser || selectedGroup ? (
-          <>
-            <div className="p-3 sm:p-4 flex items-center justify-between bg-teal-100 shadow-md">
-              <div className="flex items-center">
+        ) : selectedUser || selectedGroup ? (
+ 
+<>
+    <div className="p-3 sm:p-4 flex items-center justify-between bg-teal-700 text-white shadow-md">
+        <div className="flex items-center">
                 <img
-                  src={selectedUser ? selectedUser.profilePicture || defaultProfilePicture : selectedGroup?.profilePicture || defaultProfilePicture}
-                  alt={selectedUser ? selectedUser.username : selectedGroup?.name}
-                  className="w-8 h-8 rounded-full mr-2 border-2 border-amber-500"
-                  key={selectedUser ? selectedUser.profilePicture : selectedGroup?.profilePicture}
+                  src={selectedUser ? selectedUser.profilePicture : selectedGroup.profilePicture || defaultProfilePicture}
+                  alt={selectedUser ? selectedUser.username : selectedGroup.name}
+                  className="w-10 h-10 rounded-full mr-3 border-2 border-amber-500"
                   onError={(e) => (e.target.src = defaultProfilePicture)}
                 />
-                <h2 className="text-lg sm:text-xl font-bold text-teal-800 truncate">{selectedUser ? selectedUser.username : selectedGroup?.name}</h2>
-              </div>
-              {selectedGroup && (
-                <div className="flex items-center gap-2">
-                  {selectedGroup.ownerId === currentUser?.userId && (
-                    <div className="relative flex-shrink-0">
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/gif"
-                        onChange={(e) => setGroupPictureFile(e.target.files[0])}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        id="group-picture-upload"
-                      />
-                      <label
-                        htmlFor="group-picture-upload"
-                        className="flex items-center justify-center p-2 bg-gradient-to-r from-amber-400 to-orange-400 text-teal-900 rounded-full hover:from-amber-300 hover:to-orange-300 transition-all shadow-md cursor-pointer min-w-[44px] min-h-[44px]"
-                        title="Update Group Picture"
-                      >
-                        <FiEdit size={18} />
-                      </label>
-                      {groupPictureFile && (
-                        <div className="absolute top-12 right-0 w-64 bg-white p-3 rounded-xl shadow-xl border border-teal-100 flex flex-col items-start gap-2 z-20">
-                          <p className="text-xs text-teal-800 font-semibold truncate w-full">{groupPictureFile.name}</p>
-                          <div className="flex w-full gap-2">
-                            <button
-                              onClick={() => updateGroupPicture(selectedGroup._id)}
-                              className="flex-1 py-1.5 bg-gradient-to-r from-amber-400 to-orange-400 text-teal-900 rounded-lg hover:from-amber-300 hover:to-orange-300 transition-all text-xs font-bold shadow-md"
-                            >
-                              Upload
-                            </button>
-                            <button
-                              onClick={() => setGroupPictureFile(null)}
-                              className="flex-1 py-1.5 bg-gradient-to-r from-red-500 to-red-400 text-white rounded-lg hover:from-red-400 hover:to-red-300 transition-all text-xs font-bold shadow-md"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold">
+                    {selectedUser ? selectedUser.username : selectedGroup.name}
+                  </h2>
+                  {selectedUser && (
+                    <span className={`text-xs ${selectedUser.online ? 'text-amber-400' : 'text-teal-300'}`}>
+                      {selectedUser.online ? 'Online' : 'Offline'}
+                    </span>
                   )}
+                </div>
+              </div>
+      {selectedGroup && (
+          <div className="flex gap-2">
+          {currentUser?.userId === selectedGroup.ownerId && (
+            <div className="flex items-center">
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/gif"
+                onChange={(e) => setGroupPictureFile(e.target.files[0])}
+                className="hidden"
+                id="group-picture-upload"
+              />
+              <label
+                htmlFor="group-picture-upload"
+                className="p-2 bg-amber-500 text-teal-900 rounded-lg hover:bg-amber-400 transition-colors cursor-pointer min-w-[44px] min-h-[44px] flex items-center justify-center"
+                title="Update Group Picture"
+              >
+                <FiEdit size={18} />
+              </label>
+              {groupPictureFile && (
+                <button
+                  onClick={() => updateGroupPicture(selectedGroup._id)}
+                  className="ml-2 p-2 bg-amber-500 text-teal-900 rounded-lg hover:bg-amber-400 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                >
+                  Save
+                </button>
+              )}
+            </div>
+          )}
+          <button
+            onClick={() => setShowGroupMembers(!showGroupMembers)}
+            className="p-2 bg-amber-500 text-teal-900 rounded-lg hover:bg-amber-400 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+            title="View Group Members"
+          >
+            <FiUsers size={18} />
+          </button>
+        </div>
+
+      )}
+    </div>
+    {selectedGroup && showGroupMembers && (
+<div className="bg-teal-100 p-3 border-b border-teal-200      mx-3 sm:mx-4  max-h-40 overflow-y-auto">
+<h3 className="text-teal-800 font-semibold mb-2 text-sm">Group Members</h3>
+<ul className="space-y-2">
+  {selectedGroup.members.map((member) => (
+    <li
+      key={member._id}
+      className="flex items-center p-2 hover:bg-teal-200 rounded-lg transition-colors cursor-pointer"
+      onClick={() => viewUserProfile(member._id)}
+    >
+      <img
+        src={member.profilePicture || defaultProfilePicture}
+        alt={member.username}
+        className="w-8 h-8 rounded-full mr-2 border-2 border-amber-500"
+        onError={(e) => (e.target.src = defaultProfilePicture)}
+      />
+      <span className="text-teal-900 text-sm">{member.username}</span>
+      {member._id === selectedGroup.ownerId && (
+        <span className="ml-2 bg-amber-500 text-teal-900 text-[10px] font-semibold px-2 py-1 rounded-full">
+          Owner
+        </span>
+      )}
+    </li>
+  ))}
+</ul>
+</div>
+    )}
+
+
+    <div className="flex-1 bg-teal-50 rounded-t-lg p-3 sm:p-4 overflow-y-auto max-h-[calc(100vh-160px)] sm:max-h-[calc(100vh-180px)] shadow-inner">
+      {messages.length === 0 ? (
+        <p className="text-teal-700 text-center text-sm">No messages yet</p>
+      ) : (
+        messages.map(renderMessage)
+      )}
+      <div ref={messagesEndRef} />
+    </div>
+
+     <div className="p-3 bg-teal-100 border-t border-teal-200 relative">
+              {selectedFile && (
+                <div className="mb-2 p-2 bg-teal-200 rounded-lg flex items-center justify-between">
+                  <span className="text-teal-900 text-xs truncate max-w-[70%]">
+                    {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                  </span>
                   <button
-                    onClick={() => setShowGroupMembers(!showGroupMembers)}
-                    className="flex items-center justify-center p-2 bg-gradient-to-r from-amber-400 to-orange-400 text-teal-900 rounded-full hover:from-amber-300 hover:to-orange-300 transition-all shadow-md cursor-pointer min-w-[44px] min-h-[44px]"
-                    title="View Group Members"
+                    onClick={() => setSelectedFile(null)}
+                    className="text-red-500 hover:text-red-400 min-w-[44px] min-h-[44px] flex items-center justify-center"
                   >
-                    <FiUsers size={18} />
+                    <FiX size={18} />
                   </button>
                 </div>
               )}
-            </div>
-            {selectedGroup && showGroupMembers && (
-              <div className="bg-white p-3 mx-3 sm:mx-4 rounded-lg shadow-md max-h-40 overflow-y-auto">
-                <h3 className="text-base font-semibold text-teal-800 mb-2">Group Members</h3>
-                {selectedGroup.members.length > 0 ? (
-                  selectedGroup.members.map((member) => (
-                    <div
-                      key={member._id}
-                      className="flex items-center p-2 hover:bg-teal-50 cursor-pointer rounded-lg transition-colors"
-                      onClick={() => viewUserProfile(member._id)}
-                    >
-                      <img
-                        src={member.profilePicture || defaultProfilePicture}
-                        alt={member.username}
-                        className="w-7 h-7 rounded-full mr-2 border-2 border-amber-500"
-                        onError={(e) => (e.target.src = defaultProfilePicture)}
-                      />
-                      <span className="text-teal-900 text-xs">{member.username}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-teal-700 text-center text-xs">No members found</p>
-                )}
-              </div>
-            )}
-            <div className="flex-1 bg-white rounded-t-lg p-3 sm:p-4 overflow-y-auto max-h-[calc(100vh-160px)] sm:max-h-[calc(100vh-180px)] shadow-inner">
-              {messages.length === 0 ? (
-                <p className="text-teal-700 text-center text-sm">No messages yet</p>
-              ) : (
-                messages.map(renderMessage)
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-            <div className="p-3 sm:p-4 bg-teal-100 flex flex-col gap-2 relative">
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                  className="p-2 bg-amber-500 text-teal-900 rounded-lg hover:bg-amber-400 transition-colors shadow-md min-w-[44px] min-h-[44px]"
-                  title="Add Emoji"
+                  className="p-2 bg-teal-600 text-white rounded-lg hover:bg-teal-500 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
                 >
                   <FiSmile size={18} />
                 </button>
-                <div className="relative flex-shrink-0">
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/gif,application/pdf"
-                    onChange={(e) => setSelectedFile(e.target.files[0])}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    id="file-upload"
-                  />
-                  <label
-                    htmlFor="file-upload"
-                    className="flex items-center justify-center p-2 bg-gradient-to-r from-amber-400 to-orange-400 text-teal-900 rounded-lg hover:from-amber-300 hover:to-orange-300 transition-all shadow-md cursor-pointer min-w-[44px] min-h-[44px]"
-                    title="Attach a file"
-                  >
-                    <FiPaperclip size={18} />
-                  </label>
-                </div>
                 <input
-                  type="text"
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,application/pdf"
+                  onChange={(e) => setSelectedFile(e.target.files[0])}
+                  className="hidden"
+                  id="file-upload"
+                />
+                <label
+                  htmlFor="file-upload"
+                  className="p-2 bg-teal-600 text-white rounded-lg hover:bg-teal-500 transition-colors cursor-pointer min-w-[44px] min-h-[44px] flex items-center justify-center"
+                >
+                  <FiPaperclip size={18} />
+                </label>
+                <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="flex-1 p-2 rounded-lg bg-white text-teal-900 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm shadow-md"
                   placeholder="Type a message..."
-                  disabled={sending}
+                  className="flex-1 p-2 rounded-lg bg-white text-teal-900 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm resize-none"
+                  rows="2"
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
                 />
                 <button
                   onClick={sendMessage}
-                  className={`p-2 bg-amber-500 text-teal-900 rounded-lg hover:bg-amber-400 transition-colors shadow-md min-w-[44px] min-h-[44px] ${
+                  disabled={sending}
+                  className={`p-2 bg-amber-500 text-teal-900 rounded-lg hover:bg-amber-400 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center ${
                     sending ? 'opacity-50 cursor-not-allowed' : ''
                   }`}
-                  disabled={sending}
-                  title="Send"
                 >
                   <FiSend size={18} />
                 </button>
               </div>
-              {selectedFile && (
-                <div className="flex items-center gap-2 bg-white p-2 rounded-lg shadow-md">
-                  <p className="text-xs text-teal-700 truncate">{selectedFile.name}</p>
-                  <button
-                    onClick={() => setSelectedFile(null)}
-                    className="text-red-500 hover:text-red-400 text-xs"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
               {showEmojiPicker && (
-                <div className="absolute bottom-16 left-2 w-[90vw] sm:w-auto sm:left-4 z-50">
+                <div className="absolute bottom-16 left-3 z-50">
                   <EmojiPicker
-                    onEmojiClick={(emoji) => {
-                      setContent((prev) => prev + emoji.emoji);
-                      setShowEmojiPicker(false);
-                    }}
-                    width="100%"
-                    height={300}
+                    onEmojiClick={(emojiObject) => setContent((prev) => prev + emojiObject.emoji)}
+                    width={300}
+                    height={400}
                   />
                 </div>
               )}
             </div>
-          </>
+            </>
+
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center bg-teal-100 p-4">
-            <svg
-              className="w-24 h-24 sm:w-32 sm:h-32 text-teal-600 mb-3"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-              ></path>
-            </svg>
-            <p className="text-teal-800 text-base sm:text-lg font-semibold text-center">Select a chat to start messaging</p>
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-teal-600 text-sm sm:text-base text-center px-4">
+              Select a user or group to start chatting!
+            </p>
           </div>
         )}
       </div>
@@ -1482,4 +1568,3 @@ const startChatWithUser = async () => {
 }
 
 export default Chat;
- 

@@ -1,7 +1,4 @@
- 
- 
-
- const express = require('express');
+const express = require('express');
 const router = express.Router();
 const groupController = require('../controllers/groupController');
 const { authenticate } = require('../middleware/authMiddleware');
