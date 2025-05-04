@@ -16,14 +16,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: 'https://chat-app-git-main-abrhams-projects-8f2aac01.vercel.app/',
+    origin: 'https://chat-app-git-main-abrhams-projects-8f2aac01.vercel.app',
     methods: ['GET', 'POST', 'PUT']
    },
 });
 
 app.use(
   cors({
-    origin: 'https://chat-app-git-main-abrhams-projects-8f2aac01.vercel.app/',
+    origin: 'https://chat-app-git-main-abrhams-projects-8f2aac01.vercel.app',
     methods: ['GET', 'POST', 'PUT']
    })
 );
