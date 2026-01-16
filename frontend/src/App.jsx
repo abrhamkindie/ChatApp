@@ -1,5 +1,6 @@
 import { useContext } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import Login from './components/Login';
 import Register from './components/Register';
 import Chat from './components/Chat';
@@ -20,7 +21,8 @@ function App() {
   }
 
   return (
-    <Routes>
+    <>
+      <Routes>
          <Route
         path="/"
         element={currentUser ? <Navigate to="/chat" replace /> : <Hero />}
@@ -44,6 +46,8 @@ function App() {
       />
       <Route path="/" element={<Navigate to={currentUser ? '/chat' : '/login'} replace />} />
     </Routes>
+      <Analytics />
+    </>
   );
 }
 
